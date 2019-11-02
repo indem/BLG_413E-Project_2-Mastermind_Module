@@ -15,6 +15,11 @@
 #include <asm/switch_to.h>		/* cli(), *_flags */
 #include <linux/uaccess.h>	/* copy_*_user */
 
+/* 
+    TODO: 
+    * Check initialization grep does not give major number
+    * Check static init, dynamic init
+*/
 
 //  check if linux/uaccess.h is required for copy_*_user
 //instead of asm/uaccess
@@ -39,11 +44,12 @@ int mmind_minor = 0;
 char* mmind_number = MMIND_NUMBER;
 int mmind_max_guesses = MMIND_MAX_GUESSES;
 int mmind_line_size = 16;
-int mind_nrof_lines = MMIND_MAX_LINES;
+int mmind_nrof_lines = MMIND_MAX_LINES;
+int mmind_nr_devs = MMIND_NR_DEVS;
 
 module_param(mmind_major, int, S_IRUGO);
 module_param(mmind_minor, int, S_IRUGO);
-module_param(mmind_number, int, S_IRUGO);
+module_param(mmind_number, charp, S_IRUGO);
 module_param(mmind_max_guesses, int, S_IRUGO);
 
 MODULE_AUTHOR("iee");
@@ -65,7 +71,7 @@ int mmind_trim(struct mmind_dev *dev)
     int i;
 
     if (dev->data) {
-        for (i = 0; i < dev->qset; i++) {
+        for (i = 0; i < dev->nrof_lines; i++) {
             if (dev->data[i])
                 kfree(dev->data[i]);
         }
@@ -146,14 +152,14 @@ ssize_t mmind_write(struct file *filp, const char __user *buf, size_t count,
                     loff_t *f_pos)
 {
     struct mmind_dev *dev = filp->private_data;
-    int line_size =a dev->line_size /* FIXED 16 */, nrof_lines = dev->nrof_lines /* FIXED 256*/;
+    int line_size = dev->line_size /* FIXED 16 */, nrof_lines = dev->nrof_lines /* FIXED 256*/;
     int s_pos; // No qpos, fixed quantum size 
     ssize_t retval = -ENOMEM;
 
     if (down_interruptible(&dev->sem))
         return -ERESTARTSYS;
 
-    if (*f_pos >= line_size * number_of_lines) {
+    if (*f_pos >= line_size * nrof_lines) {
         retval = 0;
         goto out;
     }
@@ -175,8 +181,8 @@ ssize_t mmind_write(struct file *filp, const char __user *buf, size_t count,
     
     /* write only up to the end of this quantum */
     // not 4-digit number EDGE CASE
-    if (count > line_size - q_pos)
-        count = line_size - q_pos;
+    //if (count > line_size - q_pos)
+    //    count = line_size - q_pos;
 
     /* TODO: PROCESS BUFF */
     int match[4] = {0};
@@ -214,7 +220,7 @@ ssize_t mmind_write(struct file *filp, const char __user *buf, size_t count,
         attempt -= (result_line[10 + i] * powers[i]);
     }
 
-    if (copy_from_user(dev->data[s_pos] + q_pos, result_line, count)) {
+    if (copy_from_user(dev->data[s_pos] , result_line, count)) {
         retval = -EFAULT;
         goto out;
     }
@@ -265,10 +271,10 @@ long mmind_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 	  case MMIND_IOCSQUANTUM: /* Set: arg points to the value */
 		if (! capable (CAP_SYS_ADMIN))
 			return -EPERM;
-		retval = __get_user(mmind_quantum, (int __user *)arg);
+		retval = __get_user(mmind_line_size, (int __user *)arg);
 		break;
 
-	  case mmind_IOCTQUANTUM: /* Tell: arg is the value */
+	  case MMIND_IOCTQUANTUM: /* Tell: arg is the value */
 		if (! capable (CAP_SYS_ADMIN))
 			return -EPERM;
 		mmind_line_size = arg;
@@ -279,7 +285,7 @@ long mmind_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 		break;
 
 	  case MMIND_IOCQQUANTUM: /* Query: return it (it's positive) */
-		return MMIND_quantum;
+		return MMIND_LINE_SIZE;
 
 	  case MMIND_IOCXQUANTUM: /* eXchange: use arg as pointer */
 		if (! capable (CAP_SYS_ADMIN))
@@ -430,7 +436,7 @@ int mmind_init_module(void)
     for (i = 0; i < mmind_nr_devs; i++) {
         dev = &mmind_devices[i];
         dev->line_size = mmind_line_size;
-        dev->nrof_lines = mmind_max_lines;
+        dev->nrof_lines = mmind_nrof_lines;
         sema_init(&dev->sem,1);
         devno = MKDEV(mmind_major, mmind_minor + i);
         cdev_init(&dev->cdev, &mmind_fops);
