@@ -28,14 +28,18 @@
 #include "mastermind_ioctl.h"
 
 #define MMIND_MAJOR 0
-#define MMIND_NR_DEVS 4
-#define MMIND_NUMBER 4000
-#define MMIND_MAX_GUESSES 10
+#define MMIND_NR_DEVS 1
+#define MMIND_NUMBER "1234"           // secret number
+#define MMIND_LINE_SIZE 16          // FIXED 
+#define MMIND_MAX_GUESSES 10        // DEFAULT: 10 
+#define MMIND_MAX_LINES 256         // FIXED 
 
 int mmind_major = MMIND_MAJOR;
 int mmind_minor = 0;
-int mmind_number = MMIND_NUMBER;
+char* mmind_number = MMIND_NUMBER;
 int mmind_max_guesses = MMIND_MAX_GUESSES;
+int mmind_line_size = 16;
+int mind_nrof_lines = MMIND_MAX_LINES;
 
 module_param(mmind_major, int, S_IRUGO);
 module_param(mmind_minor, int, S_IRUGO);
@@ -46,17 +50,17 @@ MODULE_AUTHOR("iee");
 MODULE_LICENSE("Dual BSD/GPL");
 
 struct mmind_dev {
-    char **data;			// Lines
-    unsigned int line_size;	// Size of lines
-    unsigned long size;		// 4096 max
-    struct semaphore sem;	// TODO: Might need
-    struct cdev cdev;		// TODO: Check what this is 
+    char **data;			 // Lines
+    unsigned int line_size;	 // Size of lines (quantum)
+    unsigned int nrof_lines; // (qset)
+    unsigned long size;		 // size ((capacity)
+    struct semaphore sem;	 // 
+    struct cdev cdev;		 // char device 
 };
 
 struct mmind_dev *mmind_devices;
 
-
-int scull_trim(struct scull_dev *dev)
+int mmind_trim(struct mmind_dev *dev)
 {
     int i;
 
@@ -68,43 +72,43 @@ int scull_trim(struct scull_dev *dev)
         kfree(dev->data);
     }
     dev->data = NULL;
-    dev->quantum = scull_quantum;
-    dev->qset = scull_qset;
+    dev->line_size = mmind_line_size;
+    dev->nrof_lines = mmind_nrof_lines;
     dev->size = 0;
     return 0;
 }
 
 
-int scull_open(struct inode *inode, struct file *filp)
+int mmind_open(struct inode *inode, struct file *filp)
 {
-    struct scull_dev *dev;
+    struct mmind_dev *dev;
 
-    dev = container_of(inode->i_cdev, struct scull_dev, cdev);
+    dev = container_of(inode->i_cdev, struct mmind_dev, cdev);
     filp->private_data = dev;
 
     /* trim the device if open was write-only */
     if ((filp->f_flags & O_ACCMODE) == O_WRONLY) {
         if (down_interruptible(&dev->sem))
             return -ERESTARTSYS;
-        scull_trim(dev);
+        mmind_trim(dev);
         up(&dev->sem);
     }
     return 0;
 }
 
 
-int scull_release(struct inode *inode, struct file *filp)
+int mmind_release(struct inode *inode, struct file *filp) // TODO: End game
 {
     return 0;
 }
 
 
-ssize_t scull_read(struct file *filp, char __user *buf, size_t count,
+ssize_t mmind_read(struct file *filp, char __user *buf, size_t count,
                    loff_t *f_pos)
 {
-    struct scull_dev *dev = filp->private_data;
-    int quantum = dev->quantum;
-    int s_pos, q_pos;
+    struct mmind_dev *dev = filp->private_data;
+    int line_size = dev->line_size;
+    int s_pos; // not required, q_pos;
     ssize_t retval = 0;
 
     if (down_interruptible(&dev->sem))
@@ -114,17 +118,18 @@ ssize_t scull_read(struct file *filp, char __user *buf, size_t count,
     if (*f_pos + count > dev->size)
         count = dev->size - *f_pos;
 
-    s_pos = (long) *f_pos / quantum;
-    q_pos = (long) *f_pos % quantum;
+    s_pos = (long) *f_pos / line_size;
+    // q_pos = (long) *f_pos % quantum;
 
     if (dev->data == NULL || ! dev->data[s_pos])
         goto out;
 
+    // Not required, quantum is atomic
     /* read only up to the end of this quantum */
-    if (count > quantum - q_pos)
-        count = quantum - q_pos;
+    // if (count > quantum - q_pos)
+    //     count = quantum - q_pos;
 
-    if (copy_to_user(buf, dev->data[s_pos] + q_pos, count)) {
+    if (copy_to_user(buf, dev->data[s_pos], count)) {  // q_pos 0
         retval = -EFAULT;
         goto out;
     }
@@ -137,44 +142,83 @@ ssize_t scull_read(struct file *filp, char __user *buf, size_t count,
 }
 
 
-ssize_t scull_write(struct file *filp, const char __user *buf, size_t count,
+ssize_t mmind_write(struct file *filp, const char __user *buf, size_t count,
                     loff_t *f_pos)
 {
-    struct scull_dev *dev = filp->private_data;
-    int quantum = dev->quantum, qset = dev->qset;
-    int s_pos, q_pos;
+    struct mmind_dev *dev = filp->private_data;
+    int line_size =a dev->line_size /* FIXED 16 */, nrof_lines = dev->nrof_lines /* FIXED 256*/;
+    int s_pos; // No qpos, fixed quantum size 
     ssize_t retval = -ENOMEM;
 
     if (down_interruptible(&dev->sem))
         return -ERESTARTSYS;
 
-    if (*f_pos >= quantum * qset) {
+    if (*f_pos >= line_size * number_of_lines) {
         retval = 0;
         goto out;
     }
 
-    s_pos = (long) *f_pos / quantum;
-    q_pos = (long) *f_pos % quantum;
+    s_pos = (long) *f_pos / line_size;  // which quantum
+    ///q_pos = (long) *f_pos % line_size;  // where in quantum
 
     if (!dev->data) {
-        dev->data = kmalloc(qset * sizeof(char *), GFP_KERNEL);
+        dev->data = kmalloc(nrof_lines * sizeof(char *), GFP_KERNEL);
         if (!dev->data)
             goto out;
-        memset(dev->data, 0, qset * sizeof(char *));
+        memset(dev->data, 0, nrof_lines * sizeof(char *));
     }
     if (!dev->data[s_pos]) {
-        dev->data[s_pos] = kmalloc(quantum, GFP_KERNEL);
+        dev->data[s_pos] = kmalloc(line_size, GFP_KERNEL);
         if (!dev->data[s_pos])
             goto out;
     }
+    
     /* write only up to the end of this quantum */
-    if (count > quantum - q_pos)
-        count = quantum - q_pos;
+    // not 4-digit number EDGE CASE
+    if (count > line_size - q_pos)
+        count = line_size - q_pos;
 
-    if (copy_from_user(dev->data[s_pos] + q_pos, buf, count)) {
+    /* TODO: PROCESS BUFF */
+    int match[4] = {0};
+
+    int i, j, same_pos = 0, diff_pos = 0;
+    for (i = 0; i < 4; i++){
+        if (buf[i] == mmind_number[i]){
+            match[i] = 1;
+            same_pos++;
+        }
+    }
+
+    for (i = 0; i < 4; i++){
+        if (match[i] != 1){      
+            for (j = 0; j < 4; j++){
+                if (buf[i] == mmind_number[j])
+                    diff_pos++;
+            }
+        }
+    }
+
+    char *result_line = "xxxx s+ d- aaaa"; // x: guess s: same d: diff a: attempt
+    result_line[0] = buf[0];
+    result_line[1] = buf[1];
+    result_line[2] = buf[2];
+    result_line[3] = buf[3];
+
+    result_line[5] = same_pos; // check if needs to be casted
+    result_line[8] = diff_pos;
+
+    int attempt = s_pos;
+    int powers[4] = {1000, 100, 10, 1};
+    for (i = 0; i < 4; i++){
+        result_line[10 + i] = attempt / powers[i]; 
+        attempt -= (result_line[10 + i] * powers[i]);
+    }
+
+    if (copy_from_user(dev->data[s_pos] + q_pos, result_line, count)) {
         retval = -EFAULT;
         goto out;
     }
+
     *f_pos += count;
     retval = count;
 
@@ -187,7 +231,7 @@ ssize_t scull_write(struct file *filp, const char __user *buf, size_t count,
     return retval;
 }
 
-long scull_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
+long mmind_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 {
 
 	int err = 0, tmp;
@@ -197,8 +241,8 @@ long scull_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 	 * extract the type and number bitfields, and don't decode
 	 * wrong cmds: return ENOTTY (inappropriate ioctl) before access_ok()
 	 */
-	if (_IOC_TYPE(cmd) != SCULL_IOC_MAGIC) return -ENOTTY;
-	if (_IOC_NR(cmd) > SCULL_IOC_MAXNR) return -ENOTTY;
+	if (_IOC_TYPE(cmd) != MMIND_IOC_MAGIC) return -ENOTTY;
+	if (_IOC_NR(cmd) > MMIND_IOC_MAXNR) return -ENOTTY;
 
 	/*
 	 * the direction is a bitmask, and VERIFY_WRITE catches R/W
@@ -213,79 +257,79 @@ long scull_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 	if (err) return -EFAULT;
 
 	switch(cmd) {
-	  case SCULL_IOCRESET:
-		scull_quantum = SCULL_QUANTUM;
-		scull_qset = SCULL_QSET;
+	  case MMIND_IOCRESET:
+		mmind_line_size = MMIND_LINE_SIZE;
+		mmind_nrof_lines = MMIND_MAX_LINES;
 		break;
 
-	  case SCULL_IOCSQUANTUM: /* Set: arg points to the value */
+	  case MMIND_IOCSQUANTUM: /* Set: arg points to the value */
 		if (! capable (CAP_SYS_ADMIN))
 			return -EPERM;
-		retval = __get_user(scull_quantum, (int __user *)arg);
+		retval = __get_user(mmind_quantum, (int __user *)arg);
 		break;
 
-	  case SCULL_IOCTQUANTUM: /* Tell: arg is the value */
+	  case mmind_IOCTQUANTUM: /* Tell: arg is the value */
 		if (! capable (CAP_SYS_ADMIN))
 			return -EPERM;
-		scull_quantum = arg;
+		mmind_line_size = arg;
 		break;
 
-	  case SCULL_IOCGQUANTUM: /* Get: arg is pointer to result */
-		retval = __put_user(scull_quantum, (int __user *)arg);
+	  case MMIND_IOCGQUANTUM: /* Get: arg is pointer to result */
+		retval = __put_user(mmind_line_size, (int __user *)arg);
 		break;
 
-	  case SCULL_IOCQQUANTUM: /* Query: return it (it's positive) */
-		return scull_quantum;
+	  case MMIND_IOCQQUANTUM: /* Query: return it (it's positive) */
+		return MMIND_quantum;
 
-	  case SCULL_IOCXQUANTUM: /* eXchange: use arg as pointer */
+	  case MMIND_IOCXQUANTUM: /* eXchange: use arg as pointer */
 		if (! capable (CAP_SYS_ADMIN))
 			return -EPERM;
-		tmp = scull_quantum;
-		retval = __get_user(scull_quantum, (int __user *)arg);
+		tmp = mmind_line_size;
+		retval = __get_user(mmind_line_size, (int __user *)arg);
 		if (retval == 0)
 			retval = __put_user(tmp, (int __user *)arg);
 		break;
 
-	  case SCULL_IOCHQUANTUM: /* sHift: like Tell + Query */
+	  case MMIND_IOCHQUANTUM: /* sHift: like Tell + Query */
 		if (! capable (CAP_SYS_ADMIN))
 			return -EPERM;
-		tmp = scull_quantum;
-		scull_quantum = arg;
+		tmp = mmind_line_size;
+		mmind_line_size = arg;
 		return tmp;
 
-	  case SCULL_IOCSQSET:
+	  case MMIND_IOCSQSET:
 		if (! capable (CAP_SYS_ADMIN))
 			return -EPERM;
-		retval = __get_user(scull_qset, (int __user *)arg);
+		retval = __get_user(mmind_nrof_lines, (int __user *)arg);
 		break;
 
-	  case SCULL_IOCTQSET:
+	  case MMIND_IOCTQSET:
 		if (! capable (CAP_SYS_ADMIN))
 			return -EPERM;
-		scull_qset = arg;
+		mmind_nrof_lines = arg;
 		break;
 
-	  case SCULL_IOCGQSET:
-		retval = __put_user(scull_qset, (int __user *)arg);
+	  case MMIND_IOCGQSET:
+		retval = __put_user(mmind_nrof_lines, (int __user *)arg);
 		break;
 
-	  case SCULL_IOCQQSET:
-		return scull_qset;
+	  case MMIND_IOCQQSET:
+		return mmind_nrof_lines;
 
-	  case SCULL_IOCXQSET:
+	  case MMIND_IOCXQSET:
 		if (! capable (CAP_SYS_ADMIN))
 			return -EPERM;
-		tmp = scull_qset;
-		retval = __get_user(scull_qset, (int __user *)arg);
+		tmp = mmind_line_size;
+		retval = __get_user(mmind_line_size, (int __user *)arg);
 		if (retval == 0)
 			retval = put_user(tmp, (int __user *)arg);
 		break;
 
-	  case SCULL_IOCHQSET:
+	  case MMIND_IOCHQSET:
 		if (! capable (CAP_SYS_ADMIN))
 			return -EPERM;
-		tmp = scull_qset;
-		scull_qset = arg;
+		tmp = mmind_nrof_lines;
+		mmind_nrof_lines = arg;
 		return tmp;
 
 	  default:  /* redundant, as cmd was checked against MAXNR */
@@ -295,9 +339,9 @@ long scull_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 }
 
 
-loff_t scull_llseek(struct file *filp, loff_t off, int whence)
+loff_t mmind_llseek(struct file *filp, loff_t off, int whence)
 {
-    struct scull_dev *dev = filp->private_data;
+    struct mmind_dev *dev = filp->private_data;
     loff_t newpos;
 
     switch(whence) {
@@ -323,85 +367,86 @@ loff_t scull_llseek(struct file *filp, loff_t off, int whence)
 }
 
 
-struct file_operations scull_fops = {
+struct file_operations mmind_fops = {
     .owner =    THIS_MODULE,		// Owner of the device
-    .llseek =   scull_llseek,		// loff (*lseek) long offset, lseek is a function, seeks in file
-    .read =     scull_read,
-    .write =    scull_write,
-    .unlocked_ioctl =  scull_ioctl,
-    .open =     scull_open,
-    .release =  scull_release,
+    .llseek =   mmind_llseek,		// loff (*lseek) long offset, lseek is a function, seeks in file
+    .read =     mmind_read,
+    .write =    mmind_write,
+    .unlocked_ioctl =  mmind_ioctl,
+    .open =     mmind_open,
+    .release =  mmind_release,
 };
 
 
-void scull_cleanup_module(void)
+void mmind_cleanup_module(void)
 {
     int i;
-    dev_t devno = MKDEV(scull_major, scull_minor);
+    dev_t devno = MKDEV(mmind_major, mmind_minor);
 
-    if (scull_devices) {
-        for (i = 0; i < scull_nr_devs; i++) {
-            scull_trim(scull_devices + i);
-            cdev_del(&scull_devices[i].cdev);
+    if (mmind_devices) {
+        for (i = 0; i < mmind_nr_devs; i++) {
+            mmind_trim(mmind_devices + i);
+            cdev_del(&mmind_devices[i].cdev);
         }
-    kfree(scull_devices);
+    kfree(mmind_devices);
     }
 
-    unregister_chrdev_region(devno, scull_nr_devs);
+    unregister_chrdev_region(devno, mmind_nr_devs);
 }
 
 
-int scull_init_module(void)
+int mmind_init_module(void)
 {
     int result, i;
     int err;
     dev_t devno = 0;
-    struct scull_dev *dev;
+    struct mmind_dev *dev;
 
 
-	// Register scull, assigns numbers
-    if (scull_major) {
-        devno = MKDEV(scull_major, scull_minor);
-        result = register_chrdev_region(devno, scull_nr_devs, "scull");
-    } else {
-        result = alloc_chrdev_region(&devno, scull_minor, scull_nr_devs,
-                                     "scull");
-        scull_major = MAJOR(devno);
-    }
+	// Register mmind, assigns numbers
+    // STATIC NOT REQUIRED
+    // if (mmind_major) {
+    //     devno = MKDEV(mmind_major, mmind_minor);
+    //     result = register_chrdev_region(devno, mmind_nr_devs, "mmind");
+    // } else {
+    result = alloc_chrdev_region(&devno, mmind_minor, mmind_nr_devs,
+                                    "mmind");
+    mmind_major = MAJOR(devno);
+    // }
     if (result < 0) {
-        printk(KERN_WARNING "scull: can't get major %d\n", scull_major);
+        printk(KERN_WARNING "mmind: can't get major %d\n", mmind_major);
         return result;
     }
 
-    scull_devices = kmalloc(scull_nr_devs * sizeof(struct scull_dev),
+    mmind_devices = kmalloc(mmind_nr_devs * sizeof(struct mmind_dev),
                             GFP_KERNEL);
-    if (!scull_devices) {
+    if (!mmind_devices) {
         result = -ENOMEM;
         goto fail;
     }
-    memset(scull_devices, 0, scull_nr_devs * sizeof(struct scull_dev));
+    memset(mmind_devices, 0, mmind_nr_devs * sizeof(struct mmind_dev));
 
     /* Initialize each device. */
-    for (i = 0; i < scull_nr_devs; i++) {
-        dev = &scull_devices[i];
-        dev->quantum = scull_quantum;
-        dev->qset = scull_qset;
+    for (i = 0; i < mmind_nr_devs; i++) {
+        dev = &mmind_devices[i];
+        dev->line_size = mmind_line_size;
+        dev->nrof_lines = mmind_max_lines;
         sema_init(&dev->sem,1);
-        devno = MKDEV(scull_major, scull_minor + i);
-        cdev_init(&dev->cdev, &scull_fops);
+        devno = MKDEV(mmind_major, mmind_minor + i);
+        cdev_init(&dev->cdev, &mmind_fops);
         dev->cdev.owner = THIS_MODULE;
-        dev->cdev.ops = &scull_fops;
+        dev->cdev.ops = &mmind_fops;
         err = cdev_add(&dev->cdev, devno, 1);
         if (err)
-            printk(KERN_NOTICE "Error %d adding scull%d", err, i);
+            printk(KERN_NOTICE "Error %d adding mmind%d", err, i);
     }
 
     return 0; /* succeed */
 
   fail:
-    scull_cleanup_module();
+    mmind_cleanup_module();
     return result;
 }
 
-module_init(scull_init_module);
-module_exit(scull_cleanup_module);
+module_init(mmind_init_module);
+module_exit(mmind_cleanup_module);
