@@ -1,13 +1,31 @@
+#include <fcntl.h>
 #include <stdio.h>
+#include <sys/ioctl.h>
+#include "mastermind_ioctl.h"
+#include <unistd.h>
 
 int main()
 {
-    FILE* pFile;
-    char buffer[10];
-    int res;
-    pFile = fopen("/dev/scull1", "r");
-    res = fread(buffer, 1, 9, pFile);
-    printf("Err: %d\n", res);
-    printf("%s\n", buffer);
-    return 0;
+    int fd, retval, remaining=0;
+    char* number="2345";
+    
+    fd = open("/dev/mmind0", 0);
+    if (fd == -1){
+		printf("Couldn't open\n");
+		return 0;
+	}
+	
+//	retval = ioctl(fd, MMIND_REMAINING, &remaining);
+//	retval = ioctl(fd, MMIND_ENDGAME);
+//	retval = ioctl(fd, MMIND_NEWGAME, number);
+	
+	retval = write(fd, number, 5);
+	printf("Retval %d\n", retval);
+	number = "3489";
+	retval = write(fd, number, 5);
+	printf("Retval %d\n", retval);
+	
+	printf("Remaining %d\n", remaining);
+	
+    return 0; 
 }
