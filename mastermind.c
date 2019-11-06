@@ -330,10 +330,9 @@ long mmind_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 	  case MMIND_NEWGAME: /* Set: arg points to the value */
 		if (! capable (CAP_SYS_ADMIN))
 			return -EPERM;
-		kfree(mmind_device->data);
-		mmind_device->size = 0;
+		mmind_trim(mmind_device);
+		mmind_max_guesses = MMIND_MAX_GUESSES;
 		retval = __get_user(mmind_number, (char* __user *)arg);
-
 		break;
 	  
 	  case MMIND_REMAINING: /* Return number of remaining guesses*/
