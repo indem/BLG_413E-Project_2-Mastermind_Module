@@ -36,20 +36,23 @@
 #define MMIND_NR_DEVS 1
 #define MMIND_NUMBER "1234"           // secret number
 #define MMIND_LINE_SIZE 16 * sizeof(char)          // FIXED 
-#define MMIND_MAX_GUESSES 10        // DEFAULT: 10 
+#define MMIND_MAX_GUESSES 13        // DEFAULT: 10 
 #define MMIND_MAX_LINES 256         // FIXED 
 
 int mmind_major = MMIND_MAJOR;
 int mmind_minor = 0;
-char* mmind_number = MMIND_NUMBER;
+const int digits = 5 * sizeof(char);
+char mmind_number[5] = MMIND_NUMBER;
 int mmind_max_guesses = MMIND_MAX_GUESSES;
 int mmind_line_size = MMIND_LINE_SIZE;
 int mmind_nrof_lines = MMIND_MAX_LINES;
 int mmind_nr_devs = MMIND_NR_DEVS;
+char IOCTL_NEW_NUM[5];
+int ioctl_new_num;
 
 module_param(mmind_major, int, S_IRUGO);
 module_param(mmind_minor, int, S_IRUGO);
-module_param(mmind_number, charp, S_IRUGO);
+//module_param(mmind_number, charp, S_IRUGO);
 module_param(mmind_max_guesses, int, S_IRUGO);
 
 MODULE_AUTHOR("iee");
@@ -113,7 +116,9 @@ int mmind_release(struct inode *inode, struct file *filp) // TODO: End game
 ssize_t mmind_read(struct file *filp, char __user *buf, size_t count,
                    loff_t *f_pos)
 {    
-    printk("func burda13\n");
+	printk("IOCTL_NEW_NUM, %s", mmind_number);
+	printk("ioctl_new_num, %d", ioctl_new_num); 
+	printk("func burda13\n");
     struct mmind_dev *dev = filp->private_data;
     int line_size = dev->line_size;
     int s_pos, q_pos; // not required, q_pos;
@@ -159,34 +164,34 @@ ssize_t mmind_write(struct file *filp, const char __user *buf, size_t count,
                     loff_t *f_pos)
 {
 
-    struct mmind_dev *dev = filp->private_data;
+ struct mmind_dev *dev = filp->private_data;
     printk("Dev size: %d", dev->size);
     
     int line_size = dev->line_size /* FIXED 16 */, nrof_lines = dev->nrof_lines /* FIXED 256*/;
-    int s_pos; // No qpos, fixed quantum size 
+    int s_pos; // No qpos, fixed quantum size
     ssize_t retval = -ENOMEM;
-	char *result_line = kmalloc(mmind_line_size, GFP_KERNEL); // x: guess s: same d: diff a: attempt
-	memset(result_line, 0, mmind_line_size);
-		
-	if (count != 5){ // invalid input
-		printk("Invalid input, count: %d", count);
-		goto out;
-	}
+    char *result_line = kmalloc(mmind_line_size, GFP_KERNEL); // x: guess s: same d: diff a: attempt
+    memset(result_line, 0, mmind_line_size);
+    
+    if (count != 5){ // invalid input
+        printk("Invalid input, count: %d", count);
+        goto out;
+    }
     if (down_interruptible(&dev->sem))
         return -ERESTARTSYS;
-
+    
     if (*f_pos >= line_size * nrof_lines) {
-		printk("Exceeds capacity");
+        printk("Exceeds capacity");
         retval = 0;
         goto out;
     }
-
+    
     s_pos = (long) dev->size / line_size;  // which quantum
     //q_pos = (long) *f_pos % line_size;  // where in quantum
-	printk("Currently writing to %d", s_pos);
-	
+    printk("Currently writing to %d", s_pos);
+    
     if (!dev->data) {
-	 printk("func burda11\n");
+        printk("func burda11\n");
         dev->data = kmalloc(nrof_lines * sizeof(char *), GFP_KERNEL);
         if (!dev->data)
             goto out;
@@ -197,33 +202,35 @@ ssize_t mmind_write(struct file *filp, const char __user *buf, size_t count,
         if (!dev->data[s_pos])
             goto out;
     }
-
-	printk("Max guesses: %d", mmind_max_guesses);
-	if (mmind_max_guesses == 0){
-		printk("inside end");
-		strcpy(dev->data[s_pos], "YOU LOSE.\n");
-		dev->size += mmind_line_size;
-		retval = count;
-		goto out;
-	}
+    
+    printk("Max guesses: %d", mmind_max_guesses);
+    if (mmind_max_guesses == 0){
+        printk("inside end");
+        strcpy(dev->data[s_pos], "YOU LOSE.\n");
+        dev->size += mmind_line_size;
+        retval = count;
+        goto out;
+    }
     
     /* write only up to the end of this quantum */
     // not 4-digit number EDGE CASE
     //if (count > line_size - q_pos)
     //    count = line_size - q_pos;
-
+    
     /* TODO: PROCESS BUFF */
-	char *temp = kmalloc(count, GFP_KERNEL);
-	memset(temp, 0, count);
+    char *temp = kmalloc(count, GFP_KERNEL);
+    memset(temp, 0, count);
     if (copy_from_user(temp, buf, count)) {
         retval = -EFAULT;
         goto out;
     }
-
-    printk(temp);
-
+    
+    
+    printk("[WRITE] S_POS: %d", s_pos);
+    
+    
     int match[4] = {0};
-
+    
     unsigned int i, j;
     unsigned int same_pos = 0, diff_pos = 0;
     for (i = 0; i < 4; i++){
@@ -232,9 +239,9 @@ ssize_t mmind_write(struct file *filp, const char __user *buf, size_t count,
             same_pos++;
         }
     }
-
+    
     for (i = 0; i < 4; i++){
-        if (match[i] != 1){      
+        if (match[i] != 1){
             for (j = 0; j < 4; j++){
                 if (temp[i] == mmind_number[j])
                     diff_pos++;
@@ -243,52 +250,41 @@ ssize_t mmind_write(struct file *filp, const char __user *buf, size_t count,
     }
     
     if (same_pos == 4){
-		strcpy(dev->data[s_pos], "YOU WON!\n");
-		retval = count;
-		dev->size += mmind_line_size;
-		goto out;
-	}
-	
-	int attempt = s_pos;
-    int powers[4] = {1000, 100, 10, 1};
-    unsigned char *att_str = kmalloc(5 * sizeof(char), GFP_KERNEL);
-    memset(att_str, 0, 5 * sizeof(char));
-    unsigned char c_same_pos = '0' + same_pos, c_diff_pos = '0' + diff_pos;
-    
-    for (i = 0; i < 4; i++){
-		char digit = attempt / powers[i];
-		
-		if (i == 0)
-			strcpy(att_str, &digit);		
-		else
-			strcat(att_str, &digit); 
-		     
-        attempt -= (((int) att_str[i]) * powers[i]);
+        strcpy(dev->data[s_pos], "YOU WON!\n");
+        retval = count;
+        dev->size += mmind_line_size;
+        goto out;
     }
     
-	strncpy(result_line, temp, 4);
-	strncat(result_line, " ", 1);
-	strncat(result_line, &c_same_pos, 1);
-	strncat(result_line, "+ ", 1);
-	strncat(result_line, &c_diff_pos, 1);
-	strncat(result_line, "- ", 1);
-	strncat(result_line, att_str, 4);
-	strncat(result_line, "\n", 1);
-	
-	strcpy(dev->data[s_pos], result_line);
-
-	printk("yazılan bu");
-	printk(dev->data[s_pos]);
-	
+    unsigned char c_same_pos = '0' + same_pos, c_diff_pos = '0' + diff_pos;
+    
+	int attempt = dev->size / dev->line_size + 1;
+	char att_str[5] = "";
+	sprintf(att_str, "%04d", attempt); 
+    strncpy(result_line, temp, 4);
+    strncat(result_line, " ", 1);
+    strncat(result_line, &c_same_pos, 1);
+    strncat(result_line, "+ ", 1);
+    strncat(result_line, &c_diff_pos, 1);
+    strncat(result_line, "- ", 1);
+    strncat(result_line, " ", 1);
+    strncat(result_line, att_str, 4);
+    strncat(result_line, "\n", 1);
+    
+    strcpy(dev->data[s_pos], result_line);
+    
+    printk("yazılan bu");
+    printk(dev->data[s_pos]);
+    
     retval = count;
-	mmind_max_guesses--;
-	printk("%d", mmind_max_guesses);
+    mmind_max_guesses--;
+    printk("%d", mmind_max_guesses);
     /* update the size */
-	dev->size += mmind_line_size;
-	
-	printk("[WRITE] new dev->size %d", dev->size);
+    dev->size += mmind_line_size;
+    
+    printk("[WRITE] new dev->size %d", dev->size);
     printk("My Debugger is Printk\n");
-  out:
+out:
     up(&dev->sem);
     return retval;
 }
@@ -328,11 +324,17 @@ long mmind_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 		break;
 
 	  case MMIND_NEWGAME: /* Set: arg points to the value */
+//		if (! capable (CAP_SYS_ADMIN))
+	//		return -EPERM;
 		if (! capable (CAP_SYS_ADMIN))
 			return -EPERM;
+		int temp;
 		mmind_trim(mmind_device);
 		mmind_max_guesses = MMIND_MAX_GUESSES;
-		retval = __get_user(mmind_number, (char* __user *)arg);
+		retval = __get_user(temp, (int* __user *)arg);
+		snprintf(mmind_number, 4, "%d", ioctl_new_num);
+		//strncpy(mmind_number, IOCTL_NEW_NUM, 5);
+		
 		break;
 	  
 	  case MMIND_REMAINING: /* Return number of remaining guesses*/
@@ -435,7 +437,7 @@ int mmind_init_module(void)
 	dev->line_size = mmind_line_size;
 	dev->nrof_lines = mmind_nrof_lines;
 	sema_init(&dev->sem,1);
-	devno = MKDEV(mmind_major, mmind_minor + i);
+	devno = MKDEV(mmind_major, mmind_minor);
 	cdev_init(&dev->cdev, &mmind_fops);
 	dev->cdev.owner = THIS_MODULE;
 	dev->cdev.ops = &mmind_fops;
