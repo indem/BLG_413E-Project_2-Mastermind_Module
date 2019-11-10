@@ -47,8 +47,6 @@ int mmind_max_guesses = MMIND_MAX_GUESSES;
 int mmind_line_size = MMIND_LINE_SIZE;
 int mmind_nrof_lines = MMIND_MAX_LINES;
 int mmind_nr_devs = MMIND_NR_DEVS;
-char IOCTL_NEW_NUM[5];
-int ioctl_new_num;
 
 module_param(mmind_major, int, S_IRUGO);
 module_param(mmind_minor, int, S_IRUGO);
@@ -116,9 +114,8 @@ int mmind_release(struct inode *inode, struct file *filp) // TODO: End game
 ssize_t mmind_read(struct file *filp, char __user *buf, size_t count,
                    loff_t *f_pos)
 {    
-	printk("IOCTL_NEW_NUM, %s", mmind_number);
-	printk("ioctl_new_num, %d", ioctl_new_num); 
-	printk("func burda13\n");
+	printk("mmind_number, %s", mmind_number);
+
     struct mmind_dev *dev = filp->private_data;
     int line_size = dev->line_size;
     int s_pos, q_pos; // not required, q_pos;
@@ -332,7 +329,7 @@ long mmind_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 		mmind_trim(mmind_device);
 		mmind_max_guesses = MMIND_MAX_GUESSES;
 		retval = __get_user(temp, (int* __user *)arg);
-		snprintf(mmind_number, 4, "%d", ioctl_new_num);
+		snprintf(mmind_number, 4, "%d", temp);
 		//strncpy(mmind_number, IOCTL_NEW_NUM, 5);
 		
 		break;
