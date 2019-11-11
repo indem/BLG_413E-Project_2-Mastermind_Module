@@ -93,14 +93,6 @@ int mmind_open(struct inode *inode, struct file *filp)
     dev = container_of(inode->i_cdev, struct mmind_dev, cdev);
     filp->private_data = dev;
 
-    /* trim the device if open was write-only */
-    /*if ((filp->f_flags & O_ACCMODE) == O_WRONLY) {
-		printk("WAS OPENED WRITE ONLY");
-        if (down_interruptible(&dev->sem))
-            return -ERESTARTSYS;
-        mmind_trim(dev);
-        up(&dev->sem);
-    }*/
     return 0;
 }
 
@@ -114,26 +106,19 @@ int mmind_release(struct inode *inode, struct file *filp) // TODO: End game
 ssize_t mmind_read(struct file *filp, char __user *buf, size_t count,
                    loff_t *f_pos)
 {    
-	printk("mmind_number, %s", mmind_number);
-
     struct mmind_dev *dev = filp->private_data;
     int line_size = dev->line_size;
     int s_pos, q_pos; // not required, q_pos;
     ssize_t retval = 0;
-	printk("[READ] dev->size %d", dev->size);
-	printk("read - count: %d", count);
-	
+
     if (down_interruptible(&dev->sem))
         return -ERESTARTSYS;
     if (*f_pos >= dev->size)
         goto out;
     if (*f_pos + count > dev->size)
         count = dev->size - *f_pos;
-	
-	printk("read - count : %d", count);
-	
+		
     s_pos = (long) *f_pos / line_size;
-	printk("Reading line: %d", s_pos);
 	
     if (dev->data == NULL || ! dev->data[s_pos])
         goto out;
@@ -146,7 +131,6 @@ ssize_t mmind_read(struct file *filp, char __user *buf, size_t count,
         retval = -EFAULT;
         goto out;
     }
-	printk(dev->data[s_pos]);
 	
     *f_pos += mmind_line_size;
     retval = mmind_line_size;
@@ -161,9 +145,7 @@ ssize_t mmind_write(struct file *filp, const char __user *buf, size_t count,
                     loff_t *f_pos)
 {
 
- struct mmind_dev *dev = filp->private_data;
-    printk("Dev size: %d", dev->size);
-    
+ struct mmind_dev *dev = filp->private_data;    
     int line_size = dev->line_size /* FIXED 16 */, nrof_lines = dev->nrof_lines /* FIXED 256*/;
     int s_pos; // No qpos, fixed quantum size
     ssize_t retval = -ENOMEM;
@@ -178,17 +160,14 @@ ssize_t mmind_write(struct file *filp, const char __user *buf, size_t count,
         return -ERESTARTSYS;
     
     if (*f_pos >= line_size * nrof_lines) {
-        printk("Exceeds capacity");
         retval = 0;
         goto out;
     }
     
     s_pos = (long) dev->size / line_size;  // which quantum
     //q_pos = (long) *f_pos % line_size;  // where in quantum
-    printk("Currently writing to %d", s_pos);
     
     if (!dev->data) {
-        printk("func burda11\n");
         dev->data = kmalloc(nrof_lines * sizeof(char *), GFP_KERNEL);
         if (!dev->data)
             goto out;
@@ -200,31 +179,20 @@ ssize_t mmind_write(struct file *filp, const char __user *buf, size_t count,
             goto out;
     }
     
-    printk("Max guesses: %d", mmind_max_guesses);
     if (mmind_max_guesses == 0){
-        printk("inside end");
         strcpy(dev->data[s_pos], "YOU LOSE.\n");
         dev->size += mmind_line_size;
         retval = count;
         goto out;
     }
     
-    /* write only up to the end of this quantum */
-    // not 4-digit number EDGE CASE
-    //if (count > line_size - q_pos)
-    //    count = line_size - q_pos;
-    
-    /* TODO: PROCESS BUFF */
     char *temp = kmalloc(count, GFP_KERNEL);
     memset(temp, 0, count);
     if (copy_from_user(temp, buf, count)) {
         retval = -EFAULT;
         goto out;
     }
-    
-    
-    printk("[WRITE] S_POS: %d", s_pos);
-    
+        
     
     int match[4] = {0};
     
@@ -270,17 +238,12 @@ ssize_t mmind_write(struct file *filp, const char __user *buf, size_t count,
     
     strcpy(dev->data[s_pos], result_line);
     
-    printk("yazılan bu");
-    printk(dev->data[s_pos]);
     
     retval = count;
     mmind_max_guesses--;
-    printk("%d", mmind_max_guesses);
     /* update the size */
     dev->size += mmind_line_size;
-    
-    printk("[WRITE] new dev->size %d", dev->size);
-    printk("My Debugger is Printk\n");
+
 out:
     up(&dev->sem);
     return retval;
@@ -407,16 +370,10 @@ int mmind_init_module(void)
     struct mmind_dev *dev;
 
 
-	// Register mmind, assigns numbers
-    // STATIC NOT REQUIRED
-    // if (mmind_major) {
-    //     devno = MKDEV(mmind_major, mmind_minor);
-    //     result = register_chrdev_region(devno, mmind_nr_devs, "mmind");
-    // } else {
+
     result = alloc_chrdev_region(&devno, mmind_minor, mmind_nr_devs,
                                     "mmind");
     mmind_major = MAJOR(devno);
-    // }
     if (result < 0) {
         printk(KERN_WARNING "mmind: can't get major %d\n", mmind_major);
         return result;

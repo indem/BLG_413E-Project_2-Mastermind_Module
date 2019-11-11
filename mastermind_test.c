@@ -9,18 +9,19 @@
 #define END_GAME	'e'
 #define NEW_GAME	'n'
 #define EXIT		'x'
+#define RESULT		's'
 
 int main()
 {
     int fd, retval, remaining=0, num;
     char number[5]= "";
-    char line[16] = "";
+    char line[1000] = "";
     char option = 'a';
     
-	fd = open("/dev/mmind0", 0);
+	fd = open("/dev/mmind0", O_RDWR);
 	
 	while (option != 'x'){
-		printf("p: Play\nr: Get remaining attempts\ne: End game\nn: New game with new number\nx: Exit\n");
+		printf("p: Play\nr: Get remaining attempts\ne: End game\nn: New game with new number\ns: Get result\nx: Exit\n");
 				 
 		printf("Choose an option: ");
 		scanf(" %c", &option);
@@ -36,18 +37,10 @@ int main()
 					printf("Invalid guess, try a 4-digit number.\n");
 				
 				retval = write(fd, number, 5);
-				printf("%d", retval);
 				
-				if (retval != 0)
+				if (retval != 5)
 					printf("Error while playing.\n");
-					
-				retval = read(fd, *line, 16);
-				printf("Retval: %d\n", retval);
 				
-				if (retval == 0)
-					printf("%s\n", line);
-				else
-					printf("Error while reading.\n");
 				break;
 				
 			case REMAINING:
@@ -75,6 +68,7 @@ int main()
 			case EXIT:
 				printf("Exitting...\n");
 				break;
+				
 			default:
 				printf("Invalid choice: %c\n", option);
 				break;
