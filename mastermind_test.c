@@ -42,7 +42,12 @@ int main()
 					printf("Error while playing.\n");
 				
 				break;
-				
+			case RESULT:
+				while(retval != 0){
+					retval = read(fd, line, 16);
+					printf("%s", line);
+				}
+				break;
 			case REMAINING:
 				retval = ioctl(fd, MMIND_REMAINING, &remaining);	
 				printf("Remaining: %d\n", remaining);

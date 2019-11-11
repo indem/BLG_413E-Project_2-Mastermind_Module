@@ -252,7 +252,7 @@ out:
 long mmind_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 {
 
-	int err = 0, tmp;
+	int err = 0;
 	int retval = 0;
 
 	/*
@@ -349,7 +349,6 @@ struct file_operations mmind_fops = {
 
 void mmind_cleanup_module(void)
 {
-    int i;
     dev_t devno = MKDEV(mmind_major, mmind_minor);
 
     if (mmind_device) {
@@ -364,7 +363,7 @@ void mmind_cleanup_module(void)
 
 int mmind_init_module(void)
 {
-    int result, i;
+    int result;
     int err;
     dev_t devno = 0;
     struct mmind_dev *dev;
@@ -397,7 +396,7 @@ int mmind_init_module(void)
 	dev->cdev.ops = &mmind_fops;
 	err = cdev_add(&dev->cdev, devno, 1);
 	if (err)
-		printk(KERN_NOTICE "Error %d adding mmind%d", err, i);
+		printk(KERN_NOTICE "Error %d adding mmind", err);
 
 
     return 0; /* succeed */
