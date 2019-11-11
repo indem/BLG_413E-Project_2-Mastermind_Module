@@ -18,7 +18,7 @@ Insert module by calling
 
 To obtain device's major number
 
-```grep mmind \proc\devices```
+```grep mmind /proc/devices```
 
 mknod will be run using major number returned from grep function. Assume that grep returned 245 as mmind major number
 
