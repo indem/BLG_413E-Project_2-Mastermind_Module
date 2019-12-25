@@ -15,22 +15,12 @@
 #include <asm/switch_to.h>		/* cli(), *_flags */
 #include <linux/uaccess.h>	/* copy_*_user */
 
-/* 
-    TODO: 
-    * Check initialization grep does not give major number
-    * Check static init, dynamic init
-*/
 
-//  check if linux/uaccess.h is required for copy_*_user
-//instead of asm/uaccess
-//required after linux kernel 4.1+ ?
 #ifndef __ASM_ASM_UACCESS_H
     #include <linux/uaccess.h>
 #endif
-
-// BOOK: CHAR DEVICES CHAPTER
-
 #include "mastermind_ioctl.h"
+
 
 #define MMIND_MAJOR 0
 #define MMIND_NR_DEVS 1
@@ -97,15 +87,13 @@ int mmind_open(struct inode *inode, struct file *filp)
 }
 
 
-int mmind_release(struct inode *inode, struct file *filp) // TODO: End game
-{
+int mmind_release(struct inode *inode, struct file *filp) {
     return 0;
 }
 
 
 ssize_t mmind_read(struct file *filp, char __user *buf, size_t count,
-                   loff_t *f_pos)
-{    
+                   loff_t *f_pos) {    
     struct mmind_dev *dev = filp->private_data;
     int line_size = dev->line_size;
     int s_pos, q_pos; // not required, q_pos;
@@ -123,7 +111,6 @@ ssize_t mmind_read(struct file *filp, char __user *buf, size_t count,
     if (dev->data == NULL || ! dev->data[s_pos])
         goto out;
 
-    /* read only up to the end of this quantum */
     if (count > line_size - q_pos)
         count = line_size - q_pos;
 
@@ -164,8 +151,7 @@ ssize_t mmind_write(struct file *filp, const char __user *buf, size_t count,
         goto out;
     }
     
-    s_pos = (long) dev->size / line_size;  // which quantum
-    //q_pos = (long) *f_pos % line_size;  // where in quantum
+    s_pos = (long) dev->size / line_size; 
     
     if (!dev->data) {
         dev->data = kmalloc(nrof_lines * sizeof(char *), GFP_KERNEL);
@@ -255,19 +241,10 @@ long mmind_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 	int err = 0;
 	int retval = 0;
 
-	/*
-	 * extract the type and number bitfields, and don't decode
-	 * wrong cmds: return ENOTTY (inappropriate ioctl) before access_ok()
-	 */
+
 	if (_IOC_TYPE(cmd) != MMIND_IOC_MAGIC) return -ENOTTY;
 	if (_IOC_NR(cmd) > MMIND_MAXNR) return -ENOTTY;
 
-	/*
-	 * the direction is a bitmask, and VERIFY_WRITE catches R/W
-	 * transfers. `Type' is user-oriented, while
-	 * access_ok is kernel-oriented, so the concept of "read" and
-	 * "write" is reversed
-	 */
 	if (_IOC_DIR(cmd) & _IOC_READ)
 		err = !access_ok(VERIFY_WRITE, (void __user *)arg, _IOC_SIZE(cmd));
 	else if (_IOC_DIR(cmd) & _IOC_WRITE)
@@ -283,25 +260,21 @@ long mmind_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 		mmind_max_guesses = MMIND_MAX_GUESSES;
 		break;
 
-	  case MMIND_NEWGAME: /* Set: arg points to the value */
-//		if (! capable (CAP_SYS_ADMIN))
-	//		return -EPERM;
-		if (! capable (CAP_SYS_ADMIN))
+	  case MMIND_NEWGAME:		if (! capable (CAP_SYS_ADMIN))
 			return -EPERM;
 		int temp;
 		mmind_trim(mmind_device);
 		mmind_max_guesses = MMIND_MAX_GUESSES;
 		retval = __get_user(temp, (int* __user *)arg);
 		snprintf(mmind_number, 4, "%d", temp);
-		//strncpy(mmind_number, IOCTL_NEW_NUM, 5);
-		
+
 		break;
 	  
-	  case MMIND_REMAINING: /* Return number of remaining guesses*/
+	  case MMIND_REMAINING: 
 		retval = __put_user(mmind_max_guesses, (char* __user *)arg);
 		break;
 
-	  default:  /* redundant, as cmd was checked against MAXNR */
+	  default: 
 		return -ENOTTY;
 	}
 	return retval;
@@ -337,8 +310,8 @@ loff_t mmind_llseek(struct file *filp, loff_t off, int whence)
 
 
 struct file_operations mmind_fops = {
-    .owner =    THIS_MODULE,		// Owner of the device
-    .llseek =   mmind_llseek,		// loff (*lseek) long offset, lseek is a function, seeks in file
+    .owner =    THIS_MODULE,
+    .llseek =   mmind_llseek,
     .read =     mmind_read,
     .write =    mmind_write,
     .unlocked_ioctl =  mmind_ioctl,
@@ -399,7 +372,7 @@ int mmind_init_module(void)
 		printk(KERN_NOTICE "Error %d adding mmind", err);
 
 
-    return 0; /* succeed */
+    return 0;
 
   fail:
     mmind_cleanup_module();

@@ -43,6 +43,7 @@ int main()
 				
 				break;
 			case RESULT:
+				retval = 0;
 				while(retval != 0){
 					retval = read(fd, line, 16);
 					printf("%s", line);

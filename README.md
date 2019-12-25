@@ -2,6 +2,10 @@
 
 [Ezgi Paket](https://github.com/ezgipaket/) | [İrem Demirtaş](https://github.com/indem/) | [Ecem Konu](https://github.com/ecem.konu/)
 
+Mastermind is a kernel module written for Linux Kernel 3.13. Inspired by [Scull](https://github.com/starpos/scull), it is a character device on which two users can play the game Mastermind.
+One user initializes the module with a four digit number they picked, the other user tries to guess this number by writing to the device. To check whether their guess 
+was correct, the second player reads from the device. At each read, the device returns the number of correct digits in their correct place as well as those in incorrect places. 
+
 ## Compilation & Running
 Provide admin priviledges by
 
